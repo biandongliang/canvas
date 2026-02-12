@@ -2,138 +2,131 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>双人抢金币</title>
+<title>联网双人抢金币</title>
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <style>
-body {
-    text-align: center;
-    background: #222;
-    color: white;
-    font-family: Arial;
-}
-canvas {
-    background: #111;
-    border: 2px solid white;
-}
+body { background:#222; color:white; text-align:center; font-family:Arial; }
+canvas { background:#111; border:2px solid white; }
+button, input { padding:8px; margin:5px; }
 </style>
 </head>
 <body>
 
-<h2>双人抢金币</h2>
-<p>玩家1：WASD（蓝色） | 玩家2：方向键（红色）</p>
-<p id="score"></p>
+<h2>联网双人抢金币</h2>
+
+<div id="menu">
+<button onclick="createRoom()">创建房间</button>
+<input id="roomInput" placeholder="输入房间ID">
+<button onclick="joinRoom()">加入房间</button>
+<p id="myId"></p>
+</div>
+
 <canvas id="game" width="600" height="400"></canvas>
 
 <script>
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
-const scoreText = document.getElementById("score");
 
-const winScore = 5;
+let peer = new Peer();
+let conn;
+let isHost = false;
 
-let player1 = { x: 50, y: 200, score: 0, color: "blue" };
-let player2 = { x: 550, y: 200, score: 0, color: "red" };
-
+let player = { x: 50, y: 200 };
+let enemy = { x: 500, y: 200 };
 let coin = spawnCoin();
-let gameOver = false;
 
 function spawnCoin() {
     return {
-        x: Math.random() * (canvas.width - 20),
-        y: Math.random() * (canvas.height - 20)
+        x: Math.random() * 580,
+        y: Math.random() * 380
     };
 }
 
-document.addEventListener("keydown", (e) => {
-    if (gameOver) return;
+peer.on("open", id => {
+    document.getElementById("myId").innerText = "你的房间ID: " + id;
+});
 
+peer.on("connection", connection => {
+    conn = connection;
+    isHost = true;
+    setupConnection();
+});
+
+function createRoom() {
+    alert("把你的ID发给朋友");
+}
+
+function joinRoom() {
+    const id = document.getElementById("roomInput").value;
+    conn = peer.connect(id);
+    setupConnection();
+}
+
+function setupConnection() {
+    conn.on("data", data => {
+        enemy = data.player;
+        if (!isHost && data.coin) {
+            coin = data.coin;
+        }
+    });
+}
+
+document.addEventListener("keydown", e => {
     const speed = 15;
 
-    // 玩家1 - WASD
-    if (e.key === "w") player1.y -= speed;
-    if (e.key === "s") player1.y += speed;
-    if (e.key === "a") player1.x -= speed;
-    if (e.key === "d") player1.x += speed;
+    if (e.key === "w") player.y -= speed;
+    if (e.key === "s") player.y += speed;
+    if (e.key === "a") player.x -= speed;
+    if (e.key === "d") player.x += speed;
 
-    // 玩家2 - 方向键
-    if (e.key === "ArrowUp") player2.y -= speed;
-    if (e.key === "ArrowDown") player2.y += speed;
-    if (e.key === "ArrowLeft") player2.x -= speed;
-    if (e.key === "ArrowRight") player2.x += speed;
+    limit(player);
 
-    limit(player1);
-    limit(player2);
+    if (conn && conn.open) {
+        conn.send({
+            player: player,
+            coin: isHost ? coin : null
+        });
+    }
 
     checkCollision();
 });
 
-function limit(player) {
-    player.x = Math.max(0, Math.min(canvas.width - 30, player.x));
-    player.y = Math.max(0, Math.min(canvas.height - 30, player.y));
+function limit(p) {
+    p.x = Math.max(0, Math.min(570, p.x));
+    p.y = Math.max(0, Math.min(370, p.y));
 }
 
 function checkCollision() {
-    if (isColliding(player1, coin)) {
-        player1.score++;
+    if (isColliding(player, coin)) {
         coin = spawnCoin();
     }
-
-    if (isColliding(player2, coin)) {
-        player2.score++;
-        coin = spawnCoin();
-    }
-
-    if (player1.score >= winScore) endGame("玩家1胜利！");
-    if (player2.score >= winScore) endGame("玩家2胜利！");
 }
 
-function isColliding(player, coin) {
+function isColliding(a, b) {
     return (
-        player.x < coin.x + 20 &&
-        player.x + 30 > coin.x &&
-        player.y < coin.y + 20 &&
-        player.y + 30 > coin.y
+        a.x < b.x + 20 &&
+        a.x + 30 > b.x &&
+        a.y < b.y + 20 &&
+        a.y + 30 > b.y
     );
 }
 
-function endGame(text) {
-    gameOver = true;
-    setTimeout(() => {
-        alert(text);
-        resetGame();
-    }, 100);
-}
-
-function resetGame() {
-    player1.score = 0;
-    player2.score = 0;
-    player1.x = 50;
-    player2.x = 550;
-    coin = spawnCoin();
-    gameOver = false;
-}
-
 function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0,0,600,400);
 
-    // 画金币
-    ctx.fillStyle = "gold";
-    ctx.fillRect(coin.x, coin.y, 20, 20);
+    ctx.fillStyle="gold";
+    ctx.fillRect(coin.x, coin.y, 20,20);
 
-    // 画玩家
-    ctx.fillStyle = player1.color;
-    ctx.fillRect(player1.x, player1.y, 30, 30);
+    ctx.fillStyle="blue";
+    ctx.fillRect(player.x, player.y, 30,30);
 
-    ctx.fillStyle = player2.color;
-    ctx.fillRect(player2.x, player2.y, 30, 30);
-
-    scoreText.innerText = 
-        `玩家1: ${player1.score} 分 | 玩家2: ${player2.score} 分`;
+    ctx.fillStyle="red";
+    ctx.fillRect(enemy.x, enemy.y, 30,30);
 
     requestAnimationFrame(draw);
 }
 
 draw();
 </script>
-
 </body>
 </html>
