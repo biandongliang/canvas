@@ -1,132 +1,116 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>联网双人抢金币</title>
-<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-<style>
-body { background:#222; color:white; text-align:center; font-family:Arial; }
-canvas { background:#111; border:2px solid white; }
-button, input { padding:8px; margin:5px; }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>双人像素对战</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; font-family: Arial, sans-serif; }
+    body { display: flex; flex-direction: column; align-items: center; background: #1a1a1a; color: white; padding: 20px; }
+    canvas { border: 2px solid #333; background: #222; }
+    .info { margin: 10px 0; font-size: 18px; }
+    .controls { margin-top: 10px; font-size: 14px; color: #ccc; }
+    .game-over { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 48px; color: #fff; text-shadow: 0 0 10px #000; display: none; }
+  </style>
 </head>
 <body>
+  <h1>双人像素对战</h1>
+  <div class="info" id="info">等待玩家加入...</div>
+  <canvas id="gameCanvas" width="800" height="600"></canvas>
+  <div class="controls">
+    玩家1：WASD移动 | 玩家2：方向键移动 | 规则：先碰到对方方块获胜
+  </div>
+  <div class="game-over" id="gameOver"></div>
 
-<h2>联网双人抢金币</h2>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+  <script>
+    // 获取DOM元素
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const infoEl = document.getElementById('info');
+    const gameOverEl = document.getElementById('gameOver');
+    
+    // 游戏状态
+    let myPlayer = null;
+    let allPlayers = {};
+    let isGameOver = false;
+    const moveSpeed = 5; // 移动速度
+    
+    // 连接Socket服务器（先本地测试，部署后替换为你的服务器地址）
+    // 本地测试：const socket = io('http://localhost:3000');
+    // 部署后替换为Render/Glitch的服务器地址
+    const socket = io('https://your-server-url.onrender.com');
 
-<div id="menu">
-<button onclick="createRoom()">创建房间</button>
-<input id="roomInput" placeholder="输入房间ID">
-<button onclick="joinRoom()">加入房间</button>
-<p id="myId"></p>
-</div>
-
-<canvas id="game" width="600" height="400"></canvas>
-
-<script>
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
-
-let peer = new Peer();
-let conn;
-let isHost = false;
-
-let player = { x: 50, y: 200 };
-let enemy = { x: 500, y: 200 };
-let coin = spawnCoin();
-
-function spawnCoin() {
-    return {
-        x: Math.random() * 580,
-        y: Math.random() * 380
-    };
-}
-
-peer.on("open", id => {
-    document.getElementById("myId").innerText = "你的房间ID: " + id;
-});
-
-peer.on("connection", connection => {
-    conn = connection;
-    isHost = true;
-    setupConnection();
-});
-
-function createRoom() {
-    alert("把你的ID发给朋友");
-}
-
-function joinRoom() {
-    const id = document.getElementById("roomInput").value;
-    conn = peer.connect(id);
-    setupConnection();
-}
-
-function setupConnection() {
-    conn.on("data", data => {
-        enemy = data.player;
-        if (!isHost && data.coin) {
-            coin = data.coin;
-        }
+    // 监听玩家分配
+    socket.on('player-assign', (player) => {
+      myPlayer = player;
+      infoEl.textContent = `你是玩家${player.id}（${player.id === 1 ? 'WASD' : '方向键'}控制）`;
     });
-}
 
-document.addEventListener("keydown", e => {
-    const speed = 15;
+    // 监听房间已满
+    socket.on('room-full', () => {
+      infoEl.textContent = '房间已满！请稍后再试';
+    });
 
-    if (e.key === "w") player.y -= speed;
-    if (e.key === "s") player.y += speed;
-    if (e.key === "a") player.x -= speed;
-    if (e.key === "d") player.x += speed;
+    // 监听玩家更新
+    socket.on('players-update', (players) => {
+      allPlayers = players;
+      if (!isGameOver) renderGame();
+    });
 
-    limit(player);
+    // 监听游戏结束
+    socket.on('game-over', (data) => {
+      isGameOver = true;
+      gameOverEl.textContent = `玩家${data.winner}获胜！`;
+      gameOverEl.style.display = 'block';
+      infoEl.textContent = '游戏结束 - 刷新页面重新开始';
+    });
 
-    if (conn && conn.open) {
-        conn.send({
-            player: player,
-            coin: isHost ? coin : null
-        });
+    // 键盘控制
+    document.addEventListener('keydown', (e) => {
+      if (!myPlayer || isGameOver) return;
+      
+      let newX = myPlayer.x;
+      let newY = myPlayer.y;
+      
+      // 玩家1控制（WASD）
+      if (myPlayer.id === 1) {
+        if (e.key === 'w' || e.key === 'W') newY -= moveSpeed;
+        if (e.key === 's' || e.key === 'S') newY += moveSpeed;
+        if (e.key === 'a' || e.key === 'A') newX -= moveSpeed;
+        if (e.key === 'd' || e.key === 'D') newX += moveSpeed;
+      }
+      
+      // 玩家2控制（方向键）
+      if (myPlayer.id === 2) {
+        if (e.key === 'ArrowUp') newY -= moveSpeed;
+        if (e.key === 'ArrowDown') newY += moveSpeed;
+        if (e.key === 'ArrowLeft') newX -= moveSpeed;
+        if (e.key === 'ArrowRight') newX += moveSpeed;
+      }
+      
+      // 发送移动信息到服务器
+      socket.emit('player-move', { x: newX, y: newY });
+    });
+
+    // 渲染游戏画面
+    function renderGame() {
+      // 清空画布
+      ctx.fillStyle = '#222';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // 绘制所有玩家
+      Object.values(allPlayers).forEach(player => {
+        ctx.fillStyle = player.color;
+        ctx.fillRect(player.x, player.y, 50, 50);
+        
+        // 绘制玩家编号
+        ctx.fillStyle = 'white';
+        ctx.font = '20px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(`P${player.id}`, player.x + 25, player.y + 30);
+      });
     }
-
-    checkCollision();
-});
-
-function limit(p) {
-    p.x = Math.max(0, Math.min(570, p.x));
-    p.y = Math.max(0, Math.min(370, p.y));
-}
-
-function checkCollision() {
-    if (isColliding(player, coin)) {
-        coin = spawnCoin();
-    }
-}
-
-function isColliding(a, b) {
-    return (
-        a.x < b.x + 20 &&
-        a.x + 30 > b.x &&
-        a.y < b.y + 20 &&
-        a.y + 30 > b.y
-    );
-}
-
-function draw() {
-    ctx.clearRect(0,0,600,400);
-
-    ctx.fillStyle="gold";
-    ctx.fillRect(coin.x, coin.y, 20,20);
-
-    ctx.fillStyle="blue";
-    ctx.fillRect(player.x, player.y, 30,30);
-
-    ctx.fillStyle="red";
-    ctx.fillRect(enemy.x, enemy.y, 30,30);
-
-    requestAnimationFrame(draw);
-}
-
-draw();
-</script>
+  </script>
 </body>
 </html>
